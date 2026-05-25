@@ -2,8 +2,10 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags:
       - "*.*.*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,20 +21,20 @@ jobs:
           cache: "npm"
       - run: npm ci
       - run: npm run build
-      - name: Verify tag matches manifest version
-        run: |
-          TAG="${GITHUB_REF_NAME}"
-          MANIFEST_VERSION="$(node -p "require('./manifest.json').version")"
-          if [ "$TAG" != "$MANIFEST_VERSION" ]; then
-            echo "Tag $TAG does not match manifest version $MANIFEST_VERSION" >&2
-            exit 1
-          fi
-      - name: Create GitHub release with plugin assets
+      - name: Resolve manifest version
+        id: ver
+        run: echo "version=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Publish release if it does not already exist
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --notes "Beta release $TAG. Install via BRAT by adding \`Luis85/specorator-builder\`. Note: not yet smoke-tested in a live Obsidian vault." \
+          VERSION="${{ steps.ver.outputs.version }}"
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists; nothing to do."
+            exit 0
+          fi
+          gh release create "$VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "$VERSION" \
+            --notes "Beta release $VERSION. Install via BRAT by adding \`Luis85/specorator-builder\`. Note: not yet smoke-tested in a live Obsidian vault." \
             main.js manifest.json styles.css
