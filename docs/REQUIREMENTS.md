@@ -67,33 +67,37 @@ standalone with neither installed.
 - **FR-3** Theme the editor chrome to the active Obsidian theme (light/dark) via
   CSS variables; the GrapesJS `.gjs-*` namespace must not leak into Obsidian's
   own UI (scope bundled CSS to the view container).
-- **FR-4** Support multiple GrapesJS pages within a single project (PageManager),
-  and multiple open builder leaves (bounded — see NFR-2/risks).
+- **FR-4** A **Project** = one Project Note = one GrapesJS project holding
+  **1..N pages** via PageManager (ADR-0011): native page switcher, cross-page
+  links, project-level shared styles. A single-page site is a 1-page project.
+  Allow multiple open builder leaves (bounded — see NFR-2/risks).
 - **FR-5** Provide undo/redo, responsive/device preview, and the standard
   GrapesJS editing affordances out of the box.
 
-### 1.2 Persistence — Pages & Project Data
+### 1.2 Persistence — Project Note & Project Data
 
-- **FR-6** Persist each page as GrapesJS **native project JSON**
-  (`editor.getProjectData()`) in a dedicated vault data file. This is the
-  lossless source of truth. HTML/CSS export (`getHtml`/`getCss`) is **one-way**
-  and must never be used as a persistence/round-trip layer.
-- **FR-7** Pair each page with a human-readable markdown **page note**
-  (frontmatter + body) that documents/indexes the page and links to its data
-  file. The **page note is the user-facing canonical object** users open,
-  search, link, and review; the JSON data file is a de-emphasized sidecar.
+- **FR-6** Persist each **Project** as GrapesJS **native project JSON**
+  (`editor.getProjectData()`, all its pages) stored **verbatim** in a dedicated
+  data file. This is the lossless source of truth. HTML/CSS export
+  (`getHtml`/`getCss`) is **one-way** and must never be used as a
+  persistence/round-trip layer.
+- **FR-7** Pair each Project with a human-readable markdown **Project Note**
+  (frontmatter + body) that documents/indexes it and links to its data file via
+  `data-file`. The **Project Note is the user-facing canonical object** users
+  open, search, link, and review; it carries a stable `id` (ADR-0011); the JSON
+  data file is a de-emphasized sidecar.
 - **FR-8** Save via a custom GrapesJS Storage Manager backend
   (`editor.Storage.add('specorator', { load, store })`, registered before init
-  so autoload works), with debounced autosave and dirty-count checks to skip
-  no-op writes. Writes must be atomic (temp-write + rename) to survive a crash
-  mid-save.
-- **FR-9** Provide commands to create a page (writes the paired note + seeded
-  data file and opens the builder), open an existing page note in the builder,
+  so autoload works), delegating to `ProjectStore`, with debounced autosave and
+  dirty-count checks to skip no-op writes. Writes must be atomic (temp-write +
+  rename via the adapter API) to survive a crash mid-save.
+- **FR-9** Provide commands to create a Project (writes the paired note + seeded
+  data file and opens the builder), open an existing Project Note in the builder,
   and save.
-- **FR-10** Write an auto-generated, clearly-marked read-only HTML/CSS snapshot
-  region into the page-note body for at-a-glance review and git diffs (ADR-0006);
-  never parse it back as a source. The project-JSON data file lives in a hidden
-  `Specorator/.data/` subfolder (ADR-0005).
+- **FR-10** Write an auto-generated, clearly-marked read-only **Page Index**
+  (one HTML/CSS snapshot per page) into the Project Note body for at-a-glance
+  review and git diffs (ADR-0006); never parse it back. The data file
+  (`<id>.gjs.json`) lives in the hidden `Specorator/.data/` dot-folder (ADR-0005).
 
 ### 1.3 Component Library — One Note Per Component
 
@@ -104,9 +108,11 @@ standalone with neither installed.
   category, icon, optional params) and its markup/styles + human-readable
   documentation in the body (§4.1). The note must render cleanly in Obsidian
   reading view.
-- **FR-13** Scan the library folder and register each component as a draggable
-  GrapesJS block (`editor.Blocks.add`). Prefer a Component Definition with a
-  scoped `styles` string over an embedded `<style>` tag (GrapesJS guidance).
+- **FR-13** Scan the library folder and register each tagged component as a
+  draggable GrapesJS block (`editor.Blocks.add`) whose `content` is the note's
+  ` ```html ` fence verbatim plus its ` ```css ` wrapped in a `<style>` tag (so
+  GrapesJS imports the CSS into Project CSS on drop). Collisions are avoided by a
+  component-prefixed class convention, not auto-scoping (ADR-0012).
 - **FR-14** Live-refresh: watch the library folder (debounced) and add/update/
   remove blocks as notes change, with visible validation feedback on malformed
   frontmatter and a per-note "registered as block X" indicator.
@@ -131,12 +137,14 @@ standalone with neither installed.
 
 ### 1.5 Export & Build Pipeline
 
-- **FR-21** Export a page to standalone HTML/CSS by rendering its project JSON
-  through a **headless** GrapesJS instance in the renderer (init on a detached
-  element → `loadProjectData` → `getHtml`/`getCss` → `destroy`).
-- **FR-22** Build the whole site: iterate all page notes, render each page, write
-  `dist/<slug>/index.html`, generate an index page linking all pages, and copy
-  referenced vault assets into `dist/assets/` with rewritten relative URLs.
+- **FR-21** Build a Project to a static multi-page site by rendering its project
+  JSON through a **headless** GrapesJS instance in the renderer (init on a
+  detached element → `loadProjectData` → per page `getHtml`/`getCss` →
+  `destroy`), output to `<plugin-data>/dist/<id>/` (ADR-0014).
+- **FR-22** Within a Project, write each page to `dist/<id>/<page-slug>/index.html`
+  (the `home` page → `dist/<id>/index.html`), rewrite cross-page links to relative
+  routes, and copy referenced vault assets into `dist/<id>/assets/` with rewritten
+  URLs. Build/Preview are **per-project** (ADR-0011/0014).
 - **FR-23** Provide Export and **Reveal in file explorer** actions
   (`shell.showItemInFolder`).
 - **FR-24** Output location is configurable; defaults outside the indexed vault
@@ -199,7 +207,7 @@ standalone with neither installed.
   token controls, and Claude-asset install toggles. Settings are
   schema-versioned with forward migration.
 - **FR-37** Provide first-run onboarding: a "next steps" checklist (set folders,
-  create first page, create a sample component) and strong empty states (drop
+  create first project, create a sample component) and strong empty states (drop
   target on an empty canvas; "create one" prompts for empty library/pages).
 
 ### 1.9 Optional Astro Interop (no dependency)
@@ -266,8 +274,9 @@ fully functional with no Astro plugin present.
   (`render(projectData) → { html, css }` for headless builds), so core never
   depends on GrapesJS.
 - **ARCH-3 Named ports** (see DESIGN §3, reviewed with the deep-module/seam
-  lens): **`PageStore`** (deep — owns the page note + JSON data file together;
-  merges the former VaultPagePort + NoteIndexPort, ADR-0008), `LibraryScanPort`,
+  lens): **`ProjectStore`** (deep — owns the Project Note + JSON data file
+  together; merges the former VaultPagePort + NoteIndexPort, ADR-0008),
+  `LibraryScanPort`,
   `SettingsPort`, **`RendererPort`** (deep headless render seam; renamed from
   EditorPort), `PreviewServerPort`, `McpServerPort`, `ViewerPort` (confirmed seam
   — two adapters), and `ProcessPort` (reserved anticipated seam, no adapter yet —
@@ -284,20 +293,21 @@ artifacts:
 
 ### 4.1 Component-note convention
 
-Specorator Builder's own convention: a top-level `component:` frontmatter map
-(id, label, category, icon, params) plus **language-distinguished fenced code
-blocks** in the body — ` ```html ` + ` ```css ` consumed by Builder. The prose
-around the fences is real documentation. Optionally, a note may also carry a
-` ```astro ` fence that the independent Astro sibling can consume if the user
-runs it; Builder ignores fences it doesn't understand. This optional
-compatibility imposes no dependency.
+Specorator Builder's own convention (ADR-0012): a `specorator/component` **tag
+marker** + **flat, lightly-namespaced top-level properties** (`label`,
+`category`, `icon`, `block-id`; all optional, defaults from title/filename) plus
+**language-distinguished fenced code blocks** — ` ```html ` + ` ```css ` consumed
+by Builder. The prose around the fences is real documentation. Optionally a note
+may also carry a ` ```astro ` fence the independent Astro sibling can consume;
+Builder ignores fences it doesn't understand. This optional compatibility imposes
+no dependency.
 
-### 4.2 Page note
+### 4.2 Project note
 
-Frontmatter marks the note as a Specorator page and links to its project-JSON
-data file (`data_file`, in the hidden `Specorator/.data/` subfolder — ADR-0005),
-with `title`, `slug`/route, and `status`. Body is user documentation plus the
-auto-generated read-only snapshot region (ADR-0006).
+Frontmatter: a `specorator/project` tag marker, a stable `id`, `title`, `home`
+(which page is `/`), `status`, and `data-file` (the data file in the hidden
+`Specorator/.data/` dot-folder — ADR-0005). Body is user documentation plus the
+auto-generated read-only **Page Index** (one snapshot per page — ADR-0006).
 
 ### 4.3 Project data
 
@@ -358,7 +368,7 @@ grants, MCP token, Claude-asset toggles, and a schema version.
 **MVP**
 - Builder view + GrapesJS (preset-webpage, blocks-basic, Style/Layer/Device/
   Block/Trait managers, read code view), Obsidian theming.
-- Page persistence: custom storage adapter, paired page note + JSON data file,
+- Project persistence: ProjectStore (note + JSON data file),
   debounced atomic autosave; create/open/save commands.
 - Component library: folder scan → blocks (HTML-string content), live refresh,
   validation feedback, "save selection as component".
@@ -405,7 +415,7 @@ Resolved decisions are recorded as ADRs under `docs/adr/`; see also
 `docs/CONTEXT.md` for the ubiquitous language.
 
 - **D-1 — RESOLVED (ADR-0005).** Page data files live in a hidden
-  `Specorator/.data/` subfolder, linked from the page note.
+  `Specorator/.data/` dot-folder, linked from the Project Note.
 - **D-2 — RESOLVED (ADR-0006).** Page-note body carries an auto-generated
   read-only HTML snapshot region (plus user docs).
 - **D-3 — RESOLVED.** Builder fully owns its own preview + static export (no

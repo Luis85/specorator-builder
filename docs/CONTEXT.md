@@ -8,38 +8,52 @@
 
 ## Domain language
 
-- **Page** — a single web page the user builds visually. Materialised as a
-  *Page Note* plus a *Project Data* file (see *PageStore*).
-- **Page Note** — the user-facing markdown note that **is** the canonical,
-  openable object for a page: frontmatter (`specorator: page`, `title`, `slug`,
-  `data_file`, `status`) + a body of user docs and an auto-generated *Snapshot*.
+- **Project** — the canonical unit a user builds: one GrapesJS project containing
+  **1..N Pages** (via PageManager). Materialised as a *Project Note* + one
+  *Data File*. A single-page site is simply a 1-page project.
+- **Project Note** — the user-facing markdown note that **is** the canonical,
+  openable object for a Project: frontmatter (`tags: [specorator/project]`, `id`,
+  `title`, `data-file`, `home`, `status`) + a body of user docs and an
+  auto-generated *Page Index* of *Snapshots*.
+- **Page** — one page **inside** a Project, managed by GrapesJS PageManager. Has
+  a name and a derived route/slug. Not a separate note; surfaced in the Project
+  Note's *Page Index*.
+- **Project Id** — a stable generated id stored in the Project Note frontmatter;
+  binds the note to its *Data File* (`<DataFolder>/<id>.gjs.json`) and is the
+  handle used by MCP and reload-from-disk. Survives note rename/move.
 - **Project Data** — GrapesJS's native, lossless project JSON
-  (`editor.getProjectData()`): pages, component tree, styles, assets. The source
-  of truth for editing. Treated as an opaque blob outside the editor adapter.
+  (`editor.getProjectData()`): all pages, the component tree, styles, assets.
+  Stored **verbatim** as the editing source of truth.
 - **Data File** — the file holding *Project Data*, stored in the hidden
-  `Specorator/.data/` subfolder and linked from the *Page Note* via `data_file`.
-- **Snapshot** — an auto-generated, read-only HTML/CSS region written into the
-  *Page Note* body for at-a-glance reading and git diffs. Never parsed back.
+  `Specorator/.data/` dot-folder (adapter API; not Obsidian-Sync'd by default —
+  README/settings warn Sync users).
+- **Snapshot / Page Index** — an auto-generated, read-only HTML/CSS rendering of
+  each *Page*, written into the *Project Note* body (one section per page) for
+  at-a-glance reading and git diffs. Never parsed back.
 - **Component** — a reusable building block draggable in the builder.
-- **Component Note** — one markdown note that defines exactly one *Component*:
-  `component:` frontmatter (id, label, category, icon, params) + ` ```html `/
-  ` ```css ` fences + documentation prose. Lives in the *Library*.
-- **Block** — the GrapesJS-registered form of a *Component* (via `Blocks.add`)
-  that appears in the editor's Blocks panel.
+- **Component Note** — one markdown note defining one *Component*: a
+  `specorator/component` tag marker + flat, lightly-namespaced properties
+  (label, category, icon, block-id) + ` ```html ` / ` ```css ` fences +
+  documentation prose. Lives in the *Library*.
+- **Block** — the GrapesJS-registered form of a *Component* (`Blocks.add`) shown
+  in the editor's Blocks panel. Content is the note's HTML string; the note's
+  CSS rides along as an embedded `<style>` imported into Project CSS on drop.
 - **Library** — the configurable vault folder of *Component Notes* (default
   `Specorator/Components`), scanned and live-refreshed into *Blocks*.
-- **Builder View** — the Obsidian `ItemView` (workspace leaf) that hosts an
-  interactive GrapesJS editor bound to one *Page*.
+- **Builder View** — the Obsidian `ItemView` (workspace leaf) hosting an
+  interactive GrapesJS editor bound to one *Project*; one editor per leaf.
 - **Preview Server** — the opt-in local `127.0.0.1` static webserver that serves
-  the exported site for showcase; opened via the *Viewer*.
+  the per-project static *Build* from the plugin data folder; opened via the
+  *Viewer*.
 - **Viewer** — how a preview URL is shown: the Obsidian Web Viewer core plugin
   when enabled, otherwise the system browser.
-- **Build / Export** — rendering *Project Data* to static HTML/CSS via headless
-  GrapesJS (the *RendererPort*); a *Build* covers all pages + an index + assets.
+- **Build / Export** — rendering a *Project*'s *Project Data* (all its pages) to
+  a static multi-page site via the headless *RendererPort*, output to
+  `<plugin-data>/dist/<id>/`.
 - **MCP Server** — the opt-in local Streamable-HTTP server letting AI agents
   drive the builder through *Tools*/*Resources*/*Prompts*.
 - **Claude Assets** — the opt-in skills, subagents, and slash commands the plugin
-  installs into the vault's `.claude/` directory to help users/agents.
+  installs (single toggle) into the vault's `.claude/` directory.
 - **Consent Gate** — a one-time, default-off, revocable approval for a
   capability with a real trust boundary (Preview Server, MCP Server, executing
   Component code).

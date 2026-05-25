@@ -27,14 +27,15 @@ diff-able like any other note.
 ## 2. User Journeys
 
 **First run / onboarding.** Install → enable (desktop-only). A "next steps"
-checklist modal: confirm component/pages/data folders, "Create your first page",
+checklist modal: confirm component/projects/data folders, "Create your first project",
 "Create a sample component". Empty states carry onboarding: an empty canvas shows
 a drop target ("Drag a block here or open the Blocks panel"); an empty library
 shows "No components yet — create one".
 
-**Create a page.** Command "Create page" → name/folder prompt → plugin writes the
-paired page note (frontmatter + body) and a seeded project-JSON data file, then
-opens the builder leaf. Opening the page note later offers "Open in builder"; the
+**Create a project.** Command "Create project" → name/folder prompt → plugin
+writes the paired Project Note (frontmatter + body) with a stable `id` and a
+seeded project-JSON data file, then opens the builder leaf. Add/rename pages via
+GrapesJS PageManager. Opening the Project Note later offers "Open in builder"; the
 data file is de-emphasized.
 
 **Author a component → block.** Priya creates one note in the library folder
@@ -72,7 +73,7 @@ src/
     parsing/        frontmatter split + fenced-block extraction (pure functions)
     html/           buildHtmlDocument, buildIndexHtml (pure)
   adapters/
-    obsidian/       PageStore, LibraryScanPort, SettingsPort,
+    obsidian/       ProjectStore, LibraryScanPort, SettingsPort,
                     ViewerPort (Web Viewer)
     editor/         GrapesEditorAdapter (interactive + headless RendererPort),
                     storagePlugin, blockFactory
@@ -94,7 +95,7 @@ esbuild.config.mjs    manifest.json    versions.json    (vitest.config.ts later)
 
 | Port | Responsibility | Seam status |
 |------|----------------|-------------|
-| `PageStore` | Owns a page as *note + JSON data file kept consistent*: `create / load / saveData / list`, atomic writes. | Deep (merges the former VaultPagePort + NoteIndexPort — ADR-0008). |
+| `ProjectStore` | Owns a Project as *note + JSON data file kept consistent*: `create / load / saveData / list`, atomic writes. | Deep (merges the former VaultPagePort + NoteIndexPort — ADR-0008/0011). |
 | `LibraryScanPort` | Enumerate + read component notes; emit debounced change events. | Real (core's `ScanLibrary` depends on it). |
 | `SettingsPort` | Load/save versioned settings; provide the settings UI surface. | Retained (ADR-0010). |
 | `RendererPort` | `render(projectData) → {html, css}` headless build; hides all of GrapesJS. | Deep (renamed from EditorPort for clarity). |
@@ -110,20 +111,15 @@ the build use-cases.
 
 ## 4. Data Model & Schemas
 
-### 4.1 Component note (shared Builder ↔ Astro convention)
+### 4.1 Component note (flat props + tag — ADR-0012)
 
 ```yaml
 ---
-component:
-  id: hero-cta            # GrapesJS block id (unique, stable)
-  label: Hero CTA
-  category: Sections
-  icon: layout            # lucide name OR inline svg under component.media
-  type: html              # html | astro | component-def
-  params:                 # → GrapesJS traits and/or Astro Props
-    - { name: title, type: text, default: "Welcome" }
-    - { name: variant, type: select, options: [light, dark], default: light }
-tags: [specorator/component]
+tags: [specorator/component]   # the marker
+label: Hero CTA                # default: note title
+category: Sections             # default: "Components"
+icon: layout                   # lucide name | emoji | inline svg
+block-id: hero-cta             # default: slug of filename; stable
 ---
 ```
 
@@ -133,49 +129,46 @@ Body (human docs + machine source):
 Reusable hero with a heading and call-to-action button.
 
 ```html
-<section class="hero hero--light">
-  <h1 class="hero__title">Welcome</h1>
-  <a class="hero__cta" href="#">Get started</a>
+<section class="sp-hero sp-hero--light">
+  <h1 class="sp-hero__title">Welcome</h1>
+  <a class="sp-hero__cta" href="#">Get started</a>
 </section>
 ```
 
 ```css
-.hero { padding: 4rem 1rem; text-align: center; }
-.hero__cta { display: inline-block; padding: .75rem 1.5rem; }
+.sp-hero { padding: 4rem 1rem; text-align: center; }
+.sp-hero__cta { display: inline-block; padding: .75rem 1.5rem; }
 ```
 ````
 
-The plugin parses frontmatter → `Blocks.add(component.id, { label, category,
-media, content })`, where `content` is a Component Definition
-(`{ tagName, attributes: { class }, components: <parsed html>, styles: <css> }`)
-in preference to an embedded `<style>` tag. An optional ` ```astro ` fence in the
-same note is what `specorator-astro` consumes; Builder uses the `html`/`css`
-fences. Where only `astro` exists, Builder either strips it to HTML (lossy) or
-skips registration with a notice.
+The plugin registers `Blocks.add(blockId, { label, category, media, content })`
+where `content` is the ` ```html ` fence verbatim **plus** the ` ```css ` fence
+wrapped in a `<style>` tag, so GrapesJS imports the CSS into Project CSS on drop
+(present only where used). Collisions are avoided by the component-prefixed class
+convention (`.sp-*`), checked by `sb-lint-library`. An optional ` ```astro ` fence
+the independent Astro sibling can consume is ignored by Builder.
 
-### 4.2 Page note
+### 4.2 Project note (flat props + tag — ADR-0011/0012)
 
 ```yaml
 ---
-specorator: page
-title: Landing Page
-slug: /landing
-data_file: Specorator/.data/landing.gjs.json   # vault-relative project JSON
+tags: [specorator/project]     # the marker
+id: 9f3a2c                      # stable Project Id (binds to the data file)
+title: My Site
+home: home                      # which page is "/"
 status: draft
+data-file: Specorator/.data/9f3a2c.gjs.json   # hidden dot-folder (adapter API)
 updated: 2026-05-25
-tags: [specorator/page]
 ---
 ```
 
-Body: user documentation + an **auto-generated**, clearly-marked read-only
-snapshot region (under `## Snapshot (auto-generated — do not edit)`) — the chosen
-default (ADR-0006). The snapshot is derived from `getHtml`/`getCss` so the page is
-meaningful in reading view and in git diffs; it is never parsed back as source.
-The `data_file` lives in a hidden `Specorator/.data/` subfolder (ADR-0005).
+Body: user documentation + an **auto-generated**, clearly-marked read-only **Page
+Index** — one snapshot section per GrapesJS page (under `## Pages (auto-generated
+— do not edit)`), derived from `getHtml`/`getCss` (ADR-0006). Never parsed back.
 
 ### 4.3 Project data & settings
 
-`data_file` holds verbatim `editor.getProjectData()` JSON. Settings (via
+`data-file` holds verbatim `editor.getProjectData()` JSON. Settings (via
 `loadData`/`saveData`) hold folder paths, ports, the three consent grants, the
 MCP token, Claude-asset toggles, and a schema version (with forward migration).
 
@@ -198,16 +191,16 @@ MCP token, Claude-asset toggles, and a schema version (with forward migration).
 
 ### 5.2 Persistence wiring
 
-`PageStore` (ADR-0008) owns the whole page-persistence invariant — note + JSON
+`ProjectStore` (ADR-0008/0011) owns the whole persistence invariant — Project Note + JSON
 data file kept consistent — so callers never juggle the two halves.
 
 - Register storage **before init** as a plugin function:
   `(editor) => editor.Storage.add('specorator', { load: () =>
   pageStore.loadData(pageId), store: (data) => pageStore.saveData(pageId, data)
   })`, with `pageId` bound per editor.
-- `PageStore.saveData` writes the JSON (plugin-managed, non-markdown) via the
+- `ProjectStore.saveData` writes the JSON (plugin-managed, non-markdown) via the
   adapter API + `normalizePath` with an **atomic** temp-write + rename, then
-  refreshes the page note's snapshot region via the Vault API
+  refreshes the Project Note's Page Index via the Vault API
   (`create` / `Vault.process`) so Obsidian tracks/links it.
 - Debounce `store` (~1–2 s) and skip writes when `getDirtyCount()` is 0.
 
@@ -254,7 +247,7 @@ data file kept consistent — so callers never juggle the two halves.
 - **Prompts.** `scaffold_page` (build from library components), `audit_page`.
 - **Write-conflict model (ADR-0009).** Disk is the source of truth. When an MCP
   tool writes a page (or component) that is currently open in a builder leaf,
-  `PageStore` emits a change the view detects and the user is prompted to
+  `ProjectStore` emits a change the view detects and the user is prompted to
   **reload from disk**; the on-disk write wins, and the editor never silently
   clobbers the agent's change. `set_page_project_data` always validates and
   backs up before writing.
@@ -303,12 +296,12 @@ data file kept consistent — so callers never juggle the two halves.
 
 - **Workspace leaf:** the GrapesJS canvas + native panels (the only inherently
   non-Obsidian surface; themed to Obsidian variables).
-- **Ribbon:** one icon → open the active page in the builder, else "Create page".
+- **Ribbon:** one icon → open the active Project Note in the builder, else "Create project".
 - **Command palette:** the full command set (REQUIREMENTS FR-35).
 - **Settings tab:** single source of truth (FR-36) with contextual help and the
   consent toggles.
 - **Status bar:** save state; preview running; MCP running.
-- **Context menus:** component note → "Register/refresh as block"; page note →
+- **Context menus:** component note → "Register/refresh as block"; Project Note →
   "Open in builder", "Preview".
 
 ## 6. Optional Astro Interop (no dependency)

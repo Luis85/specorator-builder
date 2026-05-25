@@ -1,7 +1,11 @@
-# 0008 — Merge page persistence into a deep `PageStore`
+# 0008 — Merge persistence into a deep `ProjectStore`
 
 - **Status:** Accepted
 - **Date:** 2026-05-25
+- **Reframed by:** ADR-0011 (PageStore → ProjectStore; owns a project, not a page).
+
+> Originally proposed as `PageStore`; renamed `ProjectStore` once the canonical
+> unit became a Project (ADR-0011). "Page" below means the Project unit.
 
 ## Context
 
