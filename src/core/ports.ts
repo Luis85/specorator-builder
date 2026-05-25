@@ -17,6 +17,8 @@ export interface ProjectStore {
   saveData(id: string, data: ProjectData): Promise<void>;
   /** Replace the auto-generated Page Index section in the note body (ADR-0006). */
   writePageIndex(id: string, section: string): Promise<void>;
+  /** Restore the rolling `.bak` data file; false if no usable backup exists. */
+  restoreBackup(id: string): Promise<boolean>;
   list(): Promise<ProjectMeta[]>;
 }
 

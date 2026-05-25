@@ -17,7 +17,7 @@ function deps(overrides: Partial<McpToolDeps> = {}): McpToolDeps {
     ]),
     listProjects: vi.fn(async () => [meta]),
     getProjectData: vi.fn(async () => ({ pages: [] })),
-    setProjectData: vi.fn(async () => true),
+    setProjectData: vi.fn(async () => ({ ok: true })),
     createProject: vi.fn(async () => meta),
     buildProject: vi.fn(async () => ({ sitePath: "/abc/" })),
     ...overrides,
@@ -59,7 +59,7 @@ describe("callTool", () => {
   });
 
   it("sets project data through deps", async () => {
-    const set = vi.fn(async () => true);
+    const set = vi.fn(async () => ({ ok: true }));
     const r = await callTool(
       "set_project_data",
       { id: "abc", data: { pages: [] } },
@@ -67,6 +67,18 @@ describe("callTool", () => {
     );
     expect(set).toHaveBeenCalledWith("abc", { pages: [] });
     expect(r.isError).toBeUndefined();
+  });
+
+  it("surfaces a setProjectData rejection reason", async () => {
+    const r = await callTool(
+      "set_project_data",
+      { id: "abc", data: { bad: true } },
+      deps({
+        setProjectData: async () => ({ ok: false, error: "invalid data" }),
+      })
+    );
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toContain("invalid data");
   });
 
   it("errors on unknown tool", async () => {

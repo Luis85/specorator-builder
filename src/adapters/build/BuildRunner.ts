@@ -19,6 +19,8 @@ export interface BuildOutput {
   distDir: string;
   /** Site-root-relative path the preview server serves, e.g. "/9f3a2c/". */
   sitePath: string;
+  /** Non-fatal issues (e.g. ambiguous asset references) surfaced to the user. */
+  warnings: string[];
 }
 
 /** Renders a project to a static multi-page site in the plugin dist folder. */
@@ -52,34 +54,44 @@ export class BuildRunner {
     await fs.mkdir(path.join(projectDist, "assets"), { recursive: true });
 
     const copied = new Map<string, string>(); // vault path -> asset filename
+    const warnings: string[] = [];
     for (const file of plan.files) {
       const map = await this.rewriteAndCopy(
         file.path,
         file.content,
         projectDist,
-        copied
+        copied,
+        warnings
       );
       const outPath = path.join(projectDist, file.path);
       await fs.mkdir(path.dirname(outPath), { recursive: true });
       await fs.writeFile(outPath, rewriteUrls(file.content, map), "utf8");
     }
 
-    return { distDir: projectDist, sitePath: `/${id}/` };
+    return { distDir: projectDist, sitePath: `/${id}/`, warnings };
   }
 
   private async rewriteAndCopy(
     filePath: string,
     content: string,
     projectDist: string,
-    copied: Map<string, string>
+    copied: Map<string, string>,
+    warnings: string[]
   ): Promise<Map<string, string>> {
     const depth = filePath.split("/").length - 1;
     const prefix = "../".repeat(depth);
     const map = new Map<string, string>();
     for (const url of collectAssetUrls(content, content)) {
       if (isExternalUrl(url)) continue;
-      const file = this.resolveAsset(url);
-      if (!file) continue;
+      const resolved = this.resolveAsset(url);
+      if (!resolved) continue;
+      if ("ambiguous" in resolved) {
+        warnings.push(
+          `Ambiguous asset "${resolved.ambiguous}" — multiple vault files share that name; left unchanged.`
+        );
+        continue;
+      }
+      const file = resolved.file;
       let name = copied.get(file.path);
       if (!name) {
         name = uniqueName(file.name, new Set(copied.values()));
@@ -95,15 +107,17 @@ export class BuildRunner {
     return map;
   }
 
-  private resolveAsset(url: string): TFile | null {
+  private resolveAsset(
+    url: string
+  ): { file: TFile } | { ambiguous: string } | null {
     const cleaned = decodeURIComponent(url.split("?")[0]);
     const direct = this.app.vault.getAbstractFileByPath(normalizePath(cleaned));
-    if (direct instanceof TFile) return direct;
+    if (direct instanceof TFile) return { file: direct };
     const base = cleaned.split("/").pop();
-    if (base) {
-      const match = this.app.vault.getFiles().find((f) => f.name === base);
-      if (match) return match;
-    }
+    if (!base) return null;
+    const matches = this.app.vault.getFiles().filter((f) => f.name === base);
+    if (matches.length === 1) return { file: matches[0] };
+    if (matches.length > 1) return { ambiguous: base };
     return null;
   }
 }

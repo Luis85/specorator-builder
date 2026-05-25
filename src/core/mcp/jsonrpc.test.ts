@@ -6,7 +6,7 @@ const deps = (): McpToolDeps => ({
   listComponents: vi.fn(async () => []),
   listProjects: vi.fn(async () => []),
   getProjectData: vi.fn(async () => null),
-  setProjectData: vi.fn(async () => true),
+  setProjectData: vi.fn(async () => ({ ok: true })),
   createProject: vi.fn(async () => ({
     id: "a",
     title: "t",

@@ -7,7 +7,10 @@ export interface McpToolDeps {
   >;
   listProjects(): Promise<ProjectMeta[]>;
   getProjectData(id: string): Promise<ProjectData | null>;
-  setProjectData(id: string, data: ProjectData): Promise<boolean>;
+  setProjectData(
+    id: string,
+    data: ProjectData
+  ): Promise<{ ok: boolean; error?: string }>;
   createProject(title: string): Promise<ProjectMeta>;
   buildProject(id: string): Promise<{ sitePath: string } | null>;
 }
@@ -106,10 +109,10 @@ export async function callTool(
         return fail("`id` (string) is required.");
       if (typeof args.data !== "object" || args.data === null)
         return fail("`data` (object) is required.");
-      const ok = await deps.setProjectData(args.id, args.data as ProjectData);
-      return ok
+      const res = await deps.setProjectData(args.id, args.data as ProjectData);
+      return res.ok
         ? text(`Updated project "${args.id}".`)
-        : fail("No such project.");
+        : fail(res.error ?? "Could not update project.");
     }
     case "create_project": {
       if (typeof args.title !== "string")

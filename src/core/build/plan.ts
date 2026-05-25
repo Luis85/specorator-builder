@@ -1,6 +1,7 @@
 import type { RenderedPage } from "../ports";
 import { buildHtmlDocument } from "../html/document";
 import { slugify } from "../ids";
+import { rewritePageLinks } from "./links";
 
 export interface BuildFile {
   /** Path relative to the project's dist root. */
@@ -28,17 +29,28 @@ export function planBuild(
   home: string,
   pages: RenderedPage[]
 ): BuildPlan {
-  const files: BuildFile[] = pages.map((p) => ({
-    path: pageRoute(p.name, home),
+  const entries = pages.map((p) => ({
+    page: p,
+    slug: slugify(p.name) || "page",
+    route: pageRoute(p.name, home),
+  }));
+
+  // Guarantee an index.html even if no page matches `home`.
+  if (entries.length && !entries.some((e) => e.route === "index.html")) {
+    entries[0].route = "index.html";
+  }
+
+  const routes = new Map(entries.map((e) => [e.slug, e.route]));
+  const homeSlug = slugify(home) || "page";
+
+  const files: BuildFile[] = entries.map((e) => ({
+    path: e.route,
     content: buildHtmlDocument({
-      title: `${projectTitle} — ${p.name}`,
-      html: p.html,
-      css: p.css,
+      title: `${projectTitle} — ${e.page.name}`,
+      html: rewritePageLinks(e.page.html, e.route, routes, homeSlug),
+      css: e.page.css,
     }),
   }));
 
-  if (files.length && !files.some((f) => f.path === "index.html")) {
-    files[0] = { ...files[0], path: "index.html" };
-  }
   return { files };
 }
