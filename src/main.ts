@@ -34,6 +34,7 @@ export default class SpecoratorPlugin extends Plugin implements BuilderHost {
   projectStore!: ProjectStore;
   library!: LibraryScanPort;
   private viewer!: ViewerPort;
+  private renderer!: GrapesRenderer;
   private buildRunner!: BuildRunner;
   private previewServer = new PreviewServer();
   private mcpServer = new McpServer();
@@ -53,12 +54,12 @@ export default class SpecoratorPlugin extends Plugin implements BuilderHost {
       () => this.settings.componentsFolder
     );
     this.viewer = new ObsidianViewer(this.app);
-    const renderer = new GrapesRenderer();
-    this.pageIndex = new PageIndexService(this.projectStore, renderer);
+    this.renderer = new GrapesRenderer();
+    this.pageIndex = new PageIndexService(this.projectStore, this.renderer);
     this.buildRunner = new BuildRunner(
       this.app,
       this.projectStore,
-      renderer,
+      this.renderer,
       this.manifest.dir ??
         `${this.app.vault.configDir}/plugins/${this.manifest.id}`
     );
@@ -169,6 +170,17 @@ export default class SpecoratorPlugin extends Plugin implements BuilderHost {
         const id = this.currentProjectId();
         if (checking) return !!id;
         if (id) void this.pageIndex.refresh(id);
+        return true;
+      },
+    });
+
+    this.addCommand({
+      id: "restore-project-backup",
+      name: "Restore project from backup",
+      checkCallback: (checking) => {
+        const id = this.currentProjectId();
+        if (checking) return !!id;
+        if (id) void this.restoreBackup(id);
         return true;
       },
     });
@@ -315,8 +327,21 @@ export default class SpecoratorPlugin extends Plugin implements BuilderHost {
       );
       return null;
     }
-    new Notice("Specorator: build complete.");
+    if (out.warnings.length) {
+      new Notice(`Specorator: built with warnings — ${out.warnings[0]}`);
+    } else {
+      new Notice("Specorator: build complete.");
+    }
     return out;
+  }
+
+  private async restoreBackup(id: string): Promise<void> {
+    if (await this.projectStore.restoreBackup(id)) {
+      this.notifyProjectChanged(id);
+      new Notice("Specorator: restored project from backup.");
+    } else {
+      new Notice("Specorator: no usable backup to restore.");
+    }
   }
 
   private previewProject(id: string): void {
@@ -381,10 +406,20 @@ export default class SpecoratorPlugin extends Plugin implements BuilderHost {
         const exists = (await this.projectStore.list()).some(
           (m) => m.id === id
         );
-        if (!exists) return false;
+        if (!exists) return { ok: false, error: `No project with id "${id}".` };
+        // Validate by round-tripping through the headless renderer so a bad
+        // agent write can't corrupt a project (the prior data is also backed up).
+        try {
+          await this.renderer.render(data);
+        } catch (e) {
+          return {
+            ok: false,
+            error: `Rejected: not valid GrapesJS project data (${String(e)}).`,
+          };
+        }
         await this.projectStore.saveData(id, data);
         this.notifyProjectChanged(id);
-        return true;
+        return { ok: true };
       },
       createProject: (title) => this.projectStore.create(title),
       buildProject: async (id) => {

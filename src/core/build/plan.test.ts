@@ -32,4 +32,13 @@ describe("planBuild", () => {
     expect(plan.files[0].path).toBe("index.html");
     expect(plan.files[1].path).toBe("two/index.html");
   });
+
+  it("rewrites in-project links to relative routes", () => {
+    const plan = planBuild("Site", "home", [
+      page("home", '<a href="about">About</a>'),
+      page("about", '<a href="/">Home</a>'),
+    ]);
+    expect(plan.files[0].content).toContain('href="about/index.html"');
+    expect(plan.files[1].content).toContain('href="../index.html"');
+  });
 });

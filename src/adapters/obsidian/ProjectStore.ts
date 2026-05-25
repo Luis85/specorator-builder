@@ -75,6 +75,25 @@ export class VaultProjectStore implements ProjectStore {
     // renderer); ProjectStore exposes writePageIndex below for it to call.
   }
 
+  async restoreBackup(id: string): Promise<boolean> {
+    const adapter = this.app.vault.adapter;
+    const meta = (await this.list()).find((m) => m.id === id);
+    const path = meta?.dataFile ?? this.dataPathFor(id);
+    const bak = `${path}.bak`;
+    if (!(await adapter.exists(bak))) return false;
+    const content = await adapter.read(bak);
+    try {
+      JSON.parse(content);
+    } catch {
+      return false;
+    }
+    const tmp = `${path}.tmp`;
+    await adapter.write(tmp, content);
+    if (await adapter.exists(path)) await adapter.remove(path);
+    await adapter.rename(tmp, path);
+    return true;
+  }
+
   async writePageIndex(id: string, section: string): Promise<void> {
     const file = this.noteFileFor(id);
     if (!file) return;
@@ -142,9 +161,15 @@ export class VaultProjectStore implements ProjectStore {
     const adapter = this.app.vault.adapter;
     await this.ensureAdapterFolder(dirOf(path));
     const json = JSON.stringify(data, null, 2);
+    // Keep a single rolling backup so a bad write (e.g. an MCP agent) is
+    // recoverable (ADR-0009).
+    if (await adapter.exists(path)) {
+      const prev = await adapter.read(path);
+      await adapter.write(`${path}.bak`, prev);
+      await adapter.remove(path);
+    }
     const tmp = `${path}.tmp`;
     await adapter.write(tmp, json);
-    if (await adapter.exists(path)) await adapter.remove(path);
     await adapter.rename(tmp, path);
   }
 

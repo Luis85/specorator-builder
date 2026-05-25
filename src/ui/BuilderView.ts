@@ -8,6 +8,7 @@ import {
   createBuilderEditor,
   syncComponentBlocks,
 } from "../adapters/editor/grapes";
+import { ConsentModal } from "./modals";
 
 /** What the BuilderView needs from the plugin (avoids a circular import). */
 export interface BuilderHost {
@@ -83,6 +84,27 @@ export class BuilderView extends ItemView {
 
   /** Reload project data from disk into the live editor (ADR-0009 conflict model). */
   async reloadFromDisk(): Promise<void> {
+    if (!this.editor || !this.projectId) return;
+    const dirty =
+      (
+        this.editor as unknown as { getDirtyCount?: () => number }
+      ).getDirtyCount?.() ?? 0;
+    if (dirty > 0) {
+      new ConsentModal(
+        this.app,
+        {
+          title: "Project changed outside the editor",
+          body: "This project was modified (e.g. by an agent) while you have unsaved changes open here. Reload from disk and discard your changes, or keep your version?",
+          confirmText: "Reload from disk",
+        },
+        () => void this.applyDiskData()
+      ).open();
+      return;
+    }
+    await this.applyDiskData();
+  }
+
+  private async applyDiskData(): Promise<void> {
     if (!this.editor || !this.projectId) return;
     const data = await this.host.projectStore.loadData(this.projectId);
     if (data) {
