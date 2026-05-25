@@ -66,7 +66,13 @@
 }
 
 /* Align the GrapesJS dark UI a little closer to the active Obsidian theme. */
-.theme-light .gjs-one-bg { background-color: var(--background-secondary); }
-.theme-light .gjs-two-color { color: var(--text-normal); }
+.theme-light .gjs-one-bg {
+  background-color: var(--background-secondary);
+}
+.theme-light .gjs-two-color {
+  color: var(--text-normal);
+}
 .theme-light .gjs-four-color,
-.theme-light .gjs-four-color-h:hover { color: var(--interactive-accent); }
+.theme-light .gjs-four-color-h:hover {
+  color: var(--interactive-accent);
+}
