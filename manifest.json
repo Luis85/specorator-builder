@@ -1,0 +1,10 @@
+{
+  "id": "specorator-builder",
+  "name": "Specorator Builder",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Visual drag-and-drop page builder powered by GrapesJS. Pages persist as native project data files, and a reusable component library is driven by your markdown notes.",
+  "author": "luis85",
+  "authorUrl": "https://github.com/luis85",
+  "isDesktopOnly": true
+}

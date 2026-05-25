@@ -1,0 +1,72 @@
+/* Specorator Builder — plugin chrome around the bundled GrapesJS editor.
+   GrapesJS owns the .gjs-* namespace; everything here is .sp-* to avoid clashes. */
+
+.specorator-builder-view .view-content {
+  padding: 0;
+  overflow: hidden;
+}
+
+.sp-editor-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+}
+
+.sp-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  flex: 0 0 auto;
+}
+
+.sp-editor-toolbar .sp-title {
+  font-weight: var(--font-semibold);
+  margin-right: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sp-editor-toolbar button {
+  cursor: pointer;
+}
+
+.sp-editor-canvas {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* GrapesJS expects its container to fill available space. */
+.sp-editor-canvas .gjs-editor {
+  height: 100%;
+}
+
+.sp-block-icon {
+  font-size: 22px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Hidden host used for headless rendering during a site build. */
+.sp-headless-host {
+  position: fixed;
+  left: -10000px;
+  top: -10000px;
+  width: 1280px;
+  height: 800px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Align the GrapesJS dark UI a little closer to the active Obsidian theme. */
+.theme-light .gjs-one-bg { background-color: var(--background-secondary); }
+.theme-light .gjs-two-color { color: var(--text-normal); }
+.theme-light .gjs-four-color,
+.theme-light .gjs-four-color-h:hover { color: var(--interactive-accent); }
