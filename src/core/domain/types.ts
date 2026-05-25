@@ -55,7 +55,10 @@ export interface SpecoratorSettings {
     componentCode: boolean;
   };
   previewPort: number;
+  mcpPort: number;
   autosaveMs: number;
+  /** Whether the bundled Claude skills/agents/commands are installed (ADR-0015). */
+  claudeAssetsInstalled: boolean;
 }
 
 export const DEFAULT_SETTINGS: SpecoratorSettings = {
@@ -66,5 +69,7 @@ export const DEFAULT_SETTINGS: SpecoratorSettings = {
   assetsFolder: "Specorator/Assets",
   consent: { previewServer: false, mcpServer: false, componentCode: false },
   previewPort: 4830,
+  mcpPort: 4831,
   autosaveMs: 1500,
+  claudeAssetsInstalled: false,
 };

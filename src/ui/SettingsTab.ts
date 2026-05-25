@@ -5,6 +5,7 @@ export interface SettingsHost {
   app: App;
   getSettings(): SpecoratorSettings;
   saveSettings(patch: Partial<SpecoratorSettings>): Promise<void>;
+  setClaudeAssets(enabled: boolean): Promise<void>;
 }
 
 export class SpecoratorSettingTab extends PluginSettingTab {
@@ -56,20 +57,35 @@ export class SpecoratorSettingTab extends PluginSettingTab {
     );
     folder("Assets folder", "Vault folder scanned for images.", "assetsFolder");
 
-    new Setting(containerEl).setName("Preview port").addText((t) =>
-      t.setValue(String(s.previewPort)).onChange((v) => {
-        const n = Number(v);
-        if (Number.isFinite(n) && n > 0)
-          void this.host.saveSettings({ previewPort: n });
-      })
-    );
+    const port = (name: string, key: "previewPort" | "mcpPort") => {
+      new Setting(containerEl).setName(name).addText((t) =>
+        t.setValue(String(s[key])).onChange((v) => {
+          const n = Number(v);
+          if (Number.isFinite(n) && n > 0)
+            void this.host.saveSettings({ [key]: n });
+        })
+      );
+    };
+    port("Preview server port", "previewPort");
+    port("MCP server port", "mcpPort");
 
     new Setting(containerEl)
       .setHeading()
       .setName("Opt-in capabilities (default off)");
     containerEl.createEl("p", {
-      text: "Preview webserver, MCP server, and component code execution are added in later milestones; each will be a default-off consent gate.",
+      text: "The preview and MCP servers are started on demand via commands and ask for one-time consent. They bind to 127.0.0.1 only.",
       cls: "setting-item-description",
     });
+
+    new Setting(containerEl)
+      .setName("Install Claude assets")
+      .setDesc(
+        "Install the bundled skills, subagents, and slash commands into .claude/ and register the MCP server in .mcp.json (ADR-0015)."
+      )
+      .addToggle((t) =>
+        t
+          .setValue(s.claudeAssetsInstalled)
+          .onChange((v) => void this.host.setClaudeAssets(v))
+      );
   }
 }

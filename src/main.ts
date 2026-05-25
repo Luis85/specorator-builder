@@ -15,6 +15,10 @@ import { ObsidianViewer } from "./adapters/obsidian/Viewer";
 import { GrapesRenderer } from "./adapters/editor/grapes";
 import { BuildRunner } from "./adapters/build/BuildRunner";
 import { PreviewServer } from "./adapters/server/PreviewServer";
+import { McpServer } from "./adapters/server/McpServer";
+import { ClaudeAssetInstaller } from "./adapters/claude/installer";
+import type { McpToolDeps } from "./core/mcp/tools";
+import type { ProjectData } from "./core/domain/types";
 import { BuilderView, type BuilderHost } from "./ui/BuilderView";
 import { SpecoratorSettingTab } from "./ui/SettingsTab";
 import {
@@ -32,6 +36,8 @@ export default class SpecoratorPlugin extends Plugin implements BuilderHost {
   private viewer!: ViewerPort;
   private buildRunner!: BuildRunner;
   private previewServer = new PreviewServer();
+  private mcpServer = new McpServer();
+  private claude!: ClaudeAssetInstaller;
   private pageIndex!: PageIndexService;
   private pageIndexTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -56,6 +62,9 @@ export default class SpecoratorPlugin extends Plugin implements BuilderHost {
       this.manifest.dir ??
         `${this.app.vault.configDir}/plugins/${this.manifest.id}`
     );
+    this.claude = new ClaudeAssetInstaller(this.app, () => ({
+      mcpUrl: `http://127.0.0.1:${this.settings.mcpPort}/mcp`,
+    }));
 
     this.registerView(VIEW_TYPE_BUILDER, (leaf) => new BuilderView(leaf, this));
 
@@ -164,6 +173,28 @@ export default class SpecoratorPlugin extends Plugin implements BuilderHost {
       },
     });
 
+    this.addCommand({
+      id: "start-mcp",
+      name: "Start MCP server",
+      checkCallback: (checking) => {
+        if (checking) return !this.mcpServer.isRunning();
+        this.startMcp();
+        return true;
+      },
+    });
+
+    this.addCommand({
+      id: "stop-mcp",
+      name: "Stop MCP server",
+      checkCallback: (checking) => {
+        if (checking) return this.mcpServer.isRunning();
+        void this.mcpServer.stop().then(() => {
+          new Notice("Specorator: MCP server stopped.");
+        });
+        return true;
+      },
+    });
+
     this.addSettingTab(new SpecoratorSettingTab(this.app, this, this));
   }
 
@@ -171,6 +202,7 @@ export default class SpecoratorPlugin extends Plugin implements BuilderHost {
     for (const timer of this.pageIndexTimers.values()) clearTimeout(timer);
     this.pageIndexTimers.clear();
     void this.previewServer.stop();
+    void this.mcpServer.stop();
   }
 
   // --- BuilderHost ---------------------------------------------------------
@@ -200,6 +232,24 @@ export default class SpecoratorPlugin extends Plugin implements BuilderHost {
   async saveSettings(patch: Partial<SpecoratorSettings>): Promise<void> {
     this.settings = { ...this.settings, ...patch };
     await this.saveData(this.settings);
+  }
+
+  async setClaudeAssets(enabled: boolean): Promise<void> {
+    try {
+      if (enabled) {
+        const { written, skipped } = await this.claude.install();
+        new Notice(
+          `Specorator: installed ${written} Claude asset(s)` +
+            (skipped.length ? `; skipped ${skipped.length} existing.` : ".")
+        );
+      } else {
+        await this.claude.uninstall();
+        new Notice("Specorator: removed Claude assets.");
+      }
+      await this.saveSettings({ claudeAssetsInstalled: enabled });
+    } catch (e) {
+      new Notice(`Specorator: Claude asset update failed (${String(e)}).`);
+    }
   }
 
   // --- helpers -------------------------------------------------------------
@@ -293,6 +343,65 @@ export default class SpecoratorPlugin extends Plugin implements BuilderHost {
         }
       }
     );
+  }
+
+  private startMcp(): void {
+    this.ensureConsent(
+      "mcpServer",
+      {
+        title: "Start the MCP server?",
+        body: "Specorator will run a local MCP server bound to 127.0.0.1 so AI agents can drive the builder (list/create projects, get/set project data, build). Local-only and off by default.",
+        confirmText: "Start MCP",
+      },
+      async () => {
+        try {
+          const port = await this.mcpServer.start(
+            this.settings.mcpPort,
+            this.mcpDeps()
+          );
+          new Notice(`Specorator: MCP server on 127.0.0.1:${port}/mcp`);
+        } catch (e) {
+          new Notice(`Specorator: could not start MCP server (${String(e)}).`);
+        }
+      }
+    );
+  }
+
+  private mcpDeps(): McpToolDeps {
+    return {
+      listComponents: async () =>
+        (await this.library.scan()).map((d) => ({
+          blockId: d.blockId,
+          label: d.label,
+          category: d.category,
+        })),
+      listProjects: () => this.projectStore.list(),
+      getProjectData: (id) => this.projectStore.loadData(id),
+      setProjectData: async (id, data: ProjectData) => {
+        const exists = (await this.projectStore.list()).some(
+          (m) => m.id === id
+        );
+        if (!exists) return false;
+        await this.projectStore.saveData(id, data);
+        this.notifyProjectChanged(id);
+        return true;
+      },
+      createProject: (title) => this.projectStore.create(title),
+      buildProject: async (id) => {
+        const out = await this.buildRunner.build(id);
+        return out ? { sitePath: out.sitePath } : null;
+      },
+    };
+  }
+
+  /** Reload any open builder leaves bound to this project (ADR-0009). */
+  private notifyProjectChanged(id: string): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_BUILDER)) {
+      const view = leaf.view;
+      if (view instanceof BuilderView && view.getProjectId() === id) {
+        void view.reloadFromDisk();
+      }
+    }
   }
 
   private ensureConsent(

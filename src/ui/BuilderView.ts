@@ -81,6 +81,17 @@ export class BuilderView extends ItemView {
     await this.refreshBlocks();
   }
 
+  /** Reload project data from disk into the live editor (ADR-0009 conflict model). */
+  async reloadFromDisk(): Promise<void> {
+    if (!this.editor || !this.projectId) return;
+    const data = await this.host.projectStore.loadData(this.projectId);
+    if (data) {
+      this.editor.loadProjectData(
+        data as Parameters<Editor["loadProjectData"]>[0]
+      );
+    }
+  }
+
   getProjectId(): string | null {
     return this.projectId;
   }
