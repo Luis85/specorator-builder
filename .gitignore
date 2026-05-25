@@ -1,5 +1,8 @@
 node_modules/
+
+# generated build artifacts (esbuild output)
 main.js
+styles.css
 *.js.map
 
 # build artifacts kept out of source control
