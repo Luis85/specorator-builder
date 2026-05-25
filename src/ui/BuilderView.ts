@@ -15,6 +15,8 @@ export interface BuilderHost {
   projectStore: ProjectStore;
   library: LibraryScanPort;
   autosaveSteps: () => number;
+  /** Called after a successful save (e.g. to refresh the Page Index). */
+  afterSave: (id: string) => void;
 }
 
 interface BuilderState {
@@ -117,7 +119,10 @@ export class BuilderView extends ItemView {
       container: this.canvasEl,
       load: () =>
         this.host.projectStore.loadData(projectId) as Promise<ProjectData>,
-      store: (data) => this.host.projectStore.saveData(projectId, data),
+      store: async (data) => {
+        await this.host.projectStore.saveData(projectId, data);
+        this.host.afterSave(projectId);
+      },
       blocks,
       stepsBeforeSave: this.host.autosaveSteps(),
     });

@@ -5,14 +5,23 @@ import {
   SpecoratorSettings,
   ComponentDef,
 } from "./core/domain/types";
-import type { ProjectStore, LibraryScanPort } from "./core/ports";
+import type { ProjectStore, LibraryScanPort, ViewerPort } from "./core/ports";
 import { slugify } from "./core/ids";
 import { serializeComponentNote } from "./core/library/componentNote";
+import { PageIndexService } from "./core/usecases/pageIndexService";
 import { VaultProjectStore } from "./adapters/obsidian/ProjectStore";
 import { VaultLibraryScan } from "./adapters/obsidian/LibraryScan";
+import { ObsidianViewer } from "./adapters/obsidian/Viewer";
+import { GrapesRenderer } from "./adapters/editor/grapes";
+import { BuildRunner } from "./adapters/build/BuildRunner";
+import { PreviewServer } from "./adapters/server/PreviewServer";
 import { BuilderView, type BuilderHost } from "./ui/BuilderView";
 import { SpecoratorSettingTab } from "./ui/SettingsTab";
-import { CreateProjectModal, SaveComponentModal } from "./ui/modals";
+import {
+  CreateProjectModal,
+  SaveComponentModal,
+  ConsentModal,
+} from "./ui/modals";
 
 const PROJECT_TAG = "specorator/project";
 
@@ -20,6 +29,11 @@ export default class SpecoratorPlugin extends Plugin implements BuilderHost {
   settings!: SpecoratorSettings;
   projectStore!: ProjectStore;
   library!: LibraryScanPort;
+  private viewer!: ViewerPort;
+  private buildRunner!: BuildRunner;
+  private previewServer = new PreviewServer();
+  private pageIndex!: PageIndexService;
+  private pageIndexTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -31,6 +45,16 @@ export default class SpecoratorPlugin extends Plugin implements BuilderHost {
     this.library = new VaultLibraryScan(
       this.app,
       () => this.settings.componentsFolder
+    );
+    this.viewer = new ObsidianViewer(this.app);
+    const renderer = new GrapesRenderer();
+    this.pageIndex = new PageIndexService(this.projectStore, renderer);
+    this.buildRunner = new BuildRunner(
+      this.app,
+      this.projectStore,
+      renderer,
+      this.manifest.dir ??
+        `${this.app.vault.configDir}/plugins/${this.manifest.id}`
     );
 
     this.registerView(VIEW_TYPE_BUILDER, (leaf) => new BuilderView(leaf, this));
@@ -95,13 +119,76 @@ export default class SpecoratorPlugin extends Plugin implements BuilderHost {
       },
     });
 
+    this.addCommand({
+      id: "build-project",
+      name: "Build project (static site)",
+      checkCallback: (checking) => {
+        const id = this.currentProjectId();
+        if (checking) return !!id;
+        if (id) void this.buildProject(id);
+        return true;
+      },
+    });
+
+    this.addCommand({
+      id: "preview-project",
+      name: "Preview project",
+      checkCallback: (checking) => {
+        const id = this.currentProjectId();
+        if (checking) return !!id;
+        if (id) this.previewProject(id);
+        return true;
+      },
+    });
+
+    this.addCommand({
+      id: "stop-preview",
+      name: "Stop preview server",
+      checkCallback: (checking) => {
+        if (checking) return this.previewServer.isRunning();
+        void this.previewServer.stop().then(() => {
+          new Notice("Specorator: preview server stopped.");
+        });
+        return true;
+      },
+    });
+
+    this.addCommand({
+      id: "refresh-page-index",
+      name: "Refresh project page index",
+      checkCallback: (checking) => {
+        const id = this.currentProjectId();
+        if (checking) return !!id;
+        if (id) void this.pageIndex.refresh(id);
+        return true;
+      },
+    });
+
     this.addSettingTab(new SpecoratorSettingTab(this.app, this, this));
+  }
+
+  onunload(): void {
+    for (const timer of this.pageIndexTimers.values()) clearTimeout(timer);
+    this.pageIndexTimers.clear();
+    void this.previewServer.stop();
   }
 
   // --- BuilderHost ---------------------------------------------------------
 
   autosaveSteps(): number {
     return 1;
+  }
+
+  afterSave(id: string): void {
+    const existing = this.pageIndexTimers.get(id);
+    if (existing) clearTimeout(existing);
+    this.pageIndexTimers.set(
+      id,
+      setTimeout(() => {
+        this.pageIndexTimers.delete(id);
+        void this.pageIndex.refresh(id);
+      }, 4000)
+    );
   }
 
   // --- SettingsHost --------------------------------------------------------
@@ -164,6 +251,65 @@ export default class SpecoratorPlugin extends Plugin implements BuilderHost {
   private activeBuilderView(): BuilderView | null {
     const view = this.app.workspace.getActiveViewOfType(BuilderView);
     return view ?? null;
+  }
+
+  private currentProjectId(): string | null {
+    return this.activeBuilderView()?.getProjectId() ?? this.activeProjectId();
+  }
+
+  private async buildProject(id: string) {
+    const out = await this.buildRunner.build(id);
+    if (!out) {
+      new Notice(
+        "Specorator: build failed (desktop only, or no project data)."
+      );
+      return null;
+    }
+    new Notice("Specorator: build complete.");
+    return out;
+  }
+
+  private previewProject(id: string): void {
+    this.ensureConsent(
+      "previewServer",
+      {
+        title: "Start local preview server?",
+        body: "Specorator will run a local webserver bound to 127.0.0.1 to serve your built site. It is local-only and off by default.",
+        confirmText: "Start preview",
+      },
+      async () => {
+        const out = await this.buildProject(id);
+        const root = this.buildRunner.distRoot();
+        if (!out || !root) return;
+        try {
+          const port = await this.previewServer.start(
+            root,
+            this.settings.previewPort
+          );
+          await this.viewer.open(`http://127.0.0.1:${port}${out.sitePath}`);
+          new Notice(`Specorator: previewing on 127.0.0.1:${port}`);
+        } catch (e) {
+          new Notice(`Specorator: could not start preview (${String(e)}).`);
+        }
+      }
+    );
+  }
+
+  private ensureConsent(
+    key: keyof SpecoratorSettings["consent"],
+    opts: { title: string; body: string; confirmText: string },
+    action: () => void | Promise<void>
+  ): void {
+    if (this.settings.consent[key]) {
+      void action();
+      return;
+    }
+    new ConsentModal(this.app, opts, async () => {
+      await this.saveSettings({
+        consent: { ...this.settings.consent, [key]: true },
+      });
+      void action();
+    }).open();
   }
 
   private saveSelectionAsComponent(): void {

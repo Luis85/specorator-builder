@@ -15,6 +15,8 @@ export interface ProjectStore {
   load(id: string): Promise<{ meta: ProjectMeta; data: ProjectData } | null>;
   loadData(id: string): Promise<ProjectData | null>;
   saveData(id: string, data: ProjectData): Promise<void>;
+  /** Replace the auto-generated Page Index section in the note body (ADR-0006). */
+  writePageIndex(id: string, section: string): Promise<void>;
   list(): Promise<ProjectMeta[]>;
 }
 

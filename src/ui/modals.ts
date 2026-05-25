@@ -1,5 +1,36 @@
 import { App, Modal, Setting } from "obsidian";
 
+/** One-time, default-off consent gate for a capability with a trust boundary. */
+export class ConsentModal extends Modal {
+  constructor(
+    app: App,
+    private opts: { title: string; body: string; confirmText: string },
+    private onConfirm: () => void
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.titleEl.setText(this.opts.title);
+    this.contentEl.createEl("p", { text: this.opts.body });
+    new Setting(this.contentEl)
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()))
+      .addButton((b) =>
+        b
+          .setButtonText(this.opts.confirmText)
+          .setCta()
+          .onClick(() => {
+            this.close();
+            this.onConfirm();
+          })
+      );
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
 /** Prompt for a project title. */
 export class CreateProjectModal extends Modal {
   private title = "Untitled";

@@ -2,6 +2,8 @@ import { App, normalizePath, TFile } from "obsidian";
 import type { ProjectStore } from "../../core/ports";
 import type { ProjectData, ProjectMeta } from "../../core/domain/types";
 import { shortId, slugify } from "../../core/ids";
+import { splitFrontmatter } from "../../core/parsing/frontmatter";
+import { replacePageIndex } from "../../core/note/pageIndex";
 
 const PROJECT_TAG = "specorator/project";
 
@@ -69,12 +71,29 @@ export class VaultProjectStore implements ProjectStore {
   async saveData(id: string, data: ProjectData): Promise<void> {
     const meta = (await this.list()).find((m) => m.id === id);
     await this.writeData(meta?.dataFile ?? this.dataPathFor(id), data);
-    // Page Index / snapshot refresh is wired by a higher-level use-case that
-    // owns the renderer (ADR-0006); kept out of ProjectStore to avoid coupling
-    // persistence to GrapesJS.
+    // The Page Index render is orchestrated by PageIndexService (it owns the
+    // renderer); ProjectStore exposes writePageIndex below for it to call.
+  }
+
+  async writePageIndex(id: string, section: string): Promise<void> {
+    const file = this.noteFileFor(id);
+    if (!file) return;
+    await this.app.vault.process(file, (content) => {
+      const { frontmatter, body } = splitFrontmatter(content);
+      const next = replacePageIndex(body, section);
+      return frontmatter ? `---\n${frontmatter}\n---\n${next}` : next;
+    });
   }
 
   // --- internals -----------------------------------------------------------
+
+  private noteFileFor(id: string): TFile | null {
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      if (fm && hasTag(fm, PROJECT_TAG) && fm["id"] === id) return file;
+    }
+    return null;
+  }
 
   private dataPathFor(id: string): string {
     return normalizePath(`${this.getFolders().data}/${id}.gjs.json`);
