@@ -90,9 +90,10 @@ standalone with neither installed.
 - **FR-9** Provide commands to create a page (writes the paired note + seeded
   data file and opens the builder), open an existing page note in the builder,
   and save.
-- **FR-10** Optionally write an auto-generated, clearly-marked read-only HTML/CSS
-  snapshot region into the page-note body for at-a-glance review and git diffs;
-  never parse it back as a source.
+- **FR-10** Write an auto-generated, clearly-marked read-only HTML/CSS snapshot
+  region into the page-note body for at-a-glance review and git diffs (ADR-0006);
+  never parse it back as a source. The project-JSON data file lives in a hidden
+  `Specorator/.data/` subfolder (ADR-0005).
 
 ### 1.3 Component Library — One Note Per Component
 
@@ -264,9 +265,13 @@ fully functional with no Astro plugin present.
   integration lives in an `EditorAdapter` implementing an `EditorPort`
   (`render(projectData) → { html, css }` for headless builds), so core never
   depends on GrapesJS.
-- **ARCH-3 Named ports** (see DESIGN §3): VaultPagePort, NoteIndexPort,
-  LibraryScanPort, SettingsPort, EditorPort, PreviewServerPort, McpServerPort,
-  ProcessPort, ViewerPort.
+- **ARCH-3 Named ports** (see DESIGN §3, reviewed with the deep-module/seam
+  lens): **`PageStore`** (deep — owns the page note + JSON data file together;
+  merges the former VaultPagePort + NoteIndexPort, ADR-0008), `LibraryScanPort`,
+  `SettingsPort`, **`RendererPort`** (deep headless render seam; renamed from
+  EditorPort), `PreviewServerPort`, `McpServerPort`, `ViewerPort` (confirmed seam
+  — two adapters), and `ProcessPort` (reserved anticipated seam, no adapter yet —
+  ADR-0010).
 - **ARCH-4 Boundaries.** Keep boundaries clean by convention for v1; optionally
   enforce later with `eslint-plugin-boundaries` + `dependency-cruiser`.
 
@@ -290,8 +295,9 @@ compatibility imposes no dependency.
 ### 4.2 Page note
 
 Frontmatter marks the note as a Specorator page and links to its project-JSON
-data file (`data_file`), with `title`, `slug`/route, and `status`. Body is
-documentation plus the optional auto-generated snapshot region.
+data file (`data_file`, in the hidden `Specorator/.data/` subfolder — ADR-0005),
+with `title`, `slug`/route, and `status`. Body is user documentation plus the
+auto-generated read-only snapshot region (ADR-0006).
 
 ### 4.3 Project data
 
@@ -393,18 +399,24 @@ grants, MCP token, Claude-asset toggles, and a schema version.
 - **R-8** Pick default ports unlikely to collide with common dev servers (incl.
   the Astro sibling's 4321) so things coexist if both happen to run.
 
-### Decisions needing the product owner
+### Decisions
 
-- **D-1** Page data-file placement: co-located beside the page note vs a hidden
-  sidecar/data folder (git-noise vs discoverability). *Proposed default: a
-  configurable `data` subfolder linked from the note.*
-- **D-2** Page-note body content: rendered HTML summary vs markdown approximation
-  vs just a link. *Proposed default: optional auto-generated read-only snapshot.*
-- **D-3** Publish ownership: Builder fully owns its own preview + static HTML
-  export (no dependency on anything). *Proposed default: self-sufficient export;
-  the optional Astro hand-off (FR-39) is a later, dependency-free convenience.*
-- **D-4** MCP concurrency model (R-6).
-- **D-5** Claude-asset opt-in granularity: single toggle vs per-category
+Resolved decisions are recorded as ADRs under `docs/adr/`; see also
+`docs/CONTEXT.md` for the ubiquitous language.
+
+- **D-1 — RESOLVED (ADR-0005).** Page data files live in a hidden
+  `Specorator/.data/` subfolder, linked from the page note.
+- **D-2 — RESOLVED (ADR-0006).** Page-note body carries an auto-generated
+  read-only HTML snapshot region (plus user docs).
+- **D-3 — RESOLVED.** Builder fully owns its own preview + static export (no
+  dependency); the optional Astro hand-off (FR-39) is a later, dependency-free
+  convenience.
+- **D-4 — RESOLVED (ADR-0009).** MCP/open-editor conflicts use a
+  reload-from-disk prompt; disk is the source of truth.
+- **D-7 — RESOLVED (ADR-0008/0010).** Architecture review: merge page persistence
+  into a deep `PageStore`; retain the service ports (Settings/Preview/Mcp/
+  Process) and rename EditorPort → RendererPort.
+- **D-5 — OPEN.** Claude-asset opt-in granularity: single toggle vs per-category
   (skills/agents/commands). *Proposed default: single toggle in v1.*
-- **D-6** Theming depth for the GrapesJS panels (accept the visual seam vs full
-  restyle).
+- **D-6 — OPEN.** Theming depth for the GrapesJS panels (accept the visual seam
+  vs full restyle).

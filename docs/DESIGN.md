@@ -72,10 +72,10 @@ src/
     parsing/        frontmatter split + fenced-block extraction (pure functions)
     html/           buildHtmlDocument, buildIndexHtml (pure)
   adapters/
-    obsidian/       VaultPagePort, NoteIndexPort, LibraryScanPort, SettingsPort,
+    obsidian/       PageStore, LibraryScanPort, SettingsPort,
                     ViewerPort (Web Viewer)
-    editor/         GrapesEditorAdapter (interactive + headless), storagePlugin,
-                    blockFactory
+    editor/         GrapesEditorAdapter (interactive + headless RendererPort),
+                    storagePlugin, blockFactory
     server/         PreviewServer (Node http), McpServerAdapter (Streamable HTTP)
     process/        ProcessPort impl (spawn/kill, SIGTERM→SIGKILL)
     claude/         ClaudeAssetInstaller (.claude/ + .mcp.json writer)
@@ -89,22 +89,24 @@ docs/REQUIREMENTS.md  docs/DESIGN.md
 esbuild.config.mjs    manifest.json    versions.json    (vitest.config.ts later)
 ```
 
-**Ports**
+**Ports** (reviewed with the deep-module/seam lens — see `CONTEXT.md` and
+`docs/adr/`)
 
-| Port | Responsibility |
-|------|----------------|
-| `VaultPagePort` | Read/write/atomic the page project-JSON data files. |
-| `NoteIndexPort` | Create/update the companion markdown page note (Vault API). |
-| `LibraryScanPort` | Enumerate + read component notes; emit debounced change events. |
-| `SettingsPort` | Load/save versioned settings; provide the settings UI surface. |
-| `EditorPort` | `render(projectData) → {html, css}` headless build; abstracts GrapesJS. |
-| `PreviewServerPort` | Start/stop/status the local static webserver. |
-| `McpServerPort` | Start/stop/status the opt-in MCP server. |
-| `ViewerPort` | Open a URL in Web Viewer; fall back to system browser. |
-| `ProcessPort` | Spawn/terminate child processes (SIGTERM→timeout→SIGKILL). |
+| Port | Responsibility | Seam status |
+|------|----------------|-------------|
+| `PageStore` | Owns a page as *note + JSON data file kept consistent*: `create / load / saveData / list`, atomic writes. | Deep (merges the former VaultPagePort + NoteIndexPort — ADR-0008). |
+| `LibraryScanPort` | Enumerate + read component notes; emit debounced change events. | Real (core's `ScanLibrary` depends on it). |
+| `SettingsPort` | Load/save versioned settings; provide the settings UI surface. | Retained (ADR-0010). |
+| `RendererPort` | `render(projectData) → {html, css}` headless build; hides all of GrapesJS. | Deep (renamed from EditorPort for clarity). |
+| `PreviewServerPort` | Start/stop/status the local static webserver. | Retained (ADR-0010). |
+| `McpServerPort` | Start/stop/status the opt-in MCP server. | Retained (ADR-0010). |
+| `ViewerPort` | Open a URL in Web Viewer; fall back to system browser. | Confirmed seam — two adapters (Web Viewer + browser). |
+| `ProcessPort` | Spawn/terminate child processes (SIGTERM→timeout→SIGKILL). | Reserved — no adapter yet; kept as an anticipated seam (ADR-0010). |
 
-The interactive `GrapesEditorAdapter` + `storagePlugin` live in `adapters/editor`
-and are wired by the view (not by core).
+The **interactive** editor is distinct from the headless `RendererPort`: the
+`GrapesEditorAdapter` + `storagePlugin` live in `adapters/editor` and are wired by
+the view (not by core). `RendererPort` is only the headless render seam used by
+the build use-cases.
 
 ## 4. Data Model & Schemas
 
@@ -165,9 +167,11 @@ tags: [specorator/page]
 ---
 ```
 
-Body: documentation + an optional auto-generated, clearly-marked read-only
-snapshot region (e.g. under `## Snapshot (auto-generated — do not edit)`). The
-snapshot is derived from `getHtml`/`getCss` and is never parsed back.
+Body: user documentation + an **auto-generated**, clearly-marked read-only
+snapshot region (under `## Snapshot (auto-generated — do not edit)`) — the chosen
+default (ADR-0006). The snapshot is derived from `getHtml`/`getCss` so the page is
+meaningful in reading view and in git diffs; it is never parsed back as source.
+The `data_file` lives in a hidden `Specorator/.data/` subfolder (ADR-0005).
 
 ### 4.3 Project data & settings
 
@@ -187,19 +191,24 @@ MCP token, Claude-asset toggles, and a schema version (with forward migration).
   and nulls the ref. The editor instance lives on the view, never on the plugin;
   locate views via `getLeavesOfType`. Component-block markup/CSS is injected into
   the canvas iframe via GrapesJS config, not the host document.
-- **Headless render** (`EditorAdapter.render`): `grapesjs.init({ headless: true,
+- **Headless render** (`RendererPort` impl): `grapesjs.init({ headless: true,
   container: detachedDiv })` → `loadProjectData(json)` → `getHtml()`/`getCss()` →
   `destroy()`. Works in Obsidian's Electron renderer (has `window`/`document`);
   never attempt this in a pure Node child process without jsdom.
 
 ### 5.2 Persistence wiring
 
+`PageStore` (ADR-0008) owns the whole page-persistence invariant — note + JSON
+data file kept consistent — so callers never juggle the two halves.
+
 - Register storage **before init** as a plugin function:
-  `(editor) => editor.Storage.add('specorator', { load: () => port.load(pageId),
-  store: (data) => port.store(pageId, data) })`, with `pageId` bound per editor.
-- Page JSON is plugin-managed, non-markdown → adapter API + `normalizePath`,
-  with **atomic** temp-write + rename. The page note is user-visible markdown →
-  Vault API (`create` / `Vault.process`) so Obsidian tracks/links it.
+  `(editor) => editor.Storage.add('specorator', { load: () =>
+  pageStore.loadData(pageId), store: (data) => pageStore.saveData(pageId, data)
+  })`, with `pageId` bound per editor.
+- `PageStore.saveData` writes the JSON (plugin-managed, non-markdown) via the
+  adapter API + `normalizePath` with an **atomic** temp-write + rename, then
+  refreshes the page note's snapshot region via the Vault API
+  (`create` / `Vault.process`) so Obsidian tracks/links it.
 - Debounce `store` (~1–2 s) and skip writes when `getDirtyCount()` is 0.
 
 ### 5.3 Preview webserver
@@ -243,6 +252,12 @@ MCP token, Claude-asset toggles, and a schema version (with forward migration).
 - **Resources.** `specorator://components/{id}`, `specorator://pages/{id}`,
   `specorator://pages/{id}/project-data`, `specorator://build/{file}`.
 - **Prompts.** `scaffold_page` (build from library components), `audit_page`.
+- **Write-conflict model (ADR-0009).** Disk is the source of truth. When an MCP
+  tool writes a page (or component) that is currently open in a builder leaf,
+  `PageStore` emits a change the view detects and the user is prompted to
+  **reload from disk**; the on-disk write wins, and the editor never silently
+  clobbers the agent's change. `set_page_project_data` always validates and
+  backs up before writing.
 - **Security/lifecycle.** Default-off; consent dialog on first enable.
   Always-on, zero-friction protection: bind `127.0.0.1` + validate
   `Origin`/`Host` (this is what stops a malicious browser tab from POSTing to the
